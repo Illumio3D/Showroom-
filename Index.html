@@ -560,6 +560,10 @@ function openQrOverlay(modelUrl) {
   qrOverlay.hidden = false;
   qrCode.innerHTML = '';
   arButton.textContent = 'Schließen';
+  // Wandelt den relativen Modellpfad (z.B. "Sofa-AR.glb") automatisch in
+  // die volle, oeffentlich erreichbare GitHub-Pages-URL um, z.B.
+  // https://illumio3d.github.io/Showroom-/Sofa-AR.glb - funktioniert immer
+  // korrekt, egal unter welcher Domain/Unterordner die Seite laeuft.
   const absoluteUrl = new URL(modelUrl, window.location.href).href;
   QRCode.toCanvas(absoluteUrl, { width: 180, margin: 1, color: { dark: '#001230', light: '#ffffff' } }, (err, canvas) => {
     if (err) {
@@ -581,11 +585,6 @@ function openBanner(hsElement) {
   currentModelUrl = hsElement.dataset.model;
   closeQrOverlay();
 
-  // WICHTIG: Auf Mobile hat der Nutzer i.d.R. ein Geraet mit nativer
-  // AR-Faehigkeit -> direkt aktivieren. Auf Desktop gibt es keine Kamera-
-  // basierte AR -> QR-Code anzeigen, damit man mit dem Handy scannen kann.
-  // (Vorher war diese Bedingung vertauscht - deshalb kam auf Desktop kein
-  // Popup mehr.)
   arButton.onclick = () => {
     if (window.innerWidth <= 900) {
       if (viewer.activateAR) viewer.activateAR();
