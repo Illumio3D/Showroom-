@@ -123,9 +123,9 @@ html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
   margin: 0 -18px;
   position: relative;
 }
-.qr-overlay { position: absolute; left: 0; right: 0; bottom: 76px; z-index: 30; display: flex; justify-content: center; padding: 0 12px; }
-.qr-overlay[hidden] { display: none !important; }
-.qr-panel {
+.qr-overlay, .ar-info-overlay { position: absolute; left: 0; right: 0; bottom: 76px; z-index: 30; display: flex; justify-content: center; padding: 0 12px; }
+.qr-overlay[hidden], .ar-info-overlay[hidden] { display: none !important; }
+.qr-panel, .ar-info-panel {
   width: min(260px, 100%);
   padding: 16px;
   border-radius: 18px;
@@ -137,6 +137,8 @@ html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
 .qr-title { margin-bottom: 12px; color: #fff; font-size: 14px; line-height: 1.3; text-align: center; }
 .qr-code { display: flex; justify-content: center; align-items: center; min-height: 180px; }
 .qr-code canvas, .qr-code img { width: 180px !important; height: 180px !important; background: #fff; border-radius: 12px; padding: 10px; }
+.ar-info-title { color: #fff; font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.ar-info-text { color: rgba(255, 255, 255, 0.88); font-size: 13px; line-height: 1.5; }
 @media (max-width: 900px) {
   .qr-overlay { display: none !important; }
 }
@@ -287,6 +289,12 @@ model-viewer { width: 100%; height: 100%; max-height: 320px; border-radius: 0; b
             <div class="qr-code" id="qrCode"></div>
           </div>
         </div>
+        <div class="ar-info-overlay" id="arInfoOverlay" hidden>
+          <div class="ar-info-panel">
+            <div class="ar-info-title">Was macht „In AR ansehen“?</div>
+            <div class="ar-info-text" id="arInfoText"></div>
+          </div>
+        </div>
       </div>
       <div class="button-row">
         <button class="ar-button" id="arButton">In AR ansehen</button>
@@ -357,6 +365,8 @@ const arButton = document.getElementById('arButton');
 const qrOverlay = document.getElementById('qrOverlay');
 const qrCode = document.getElementById('qrCode');
 const infoButton = document.getElementById('infoButton');
+const arInfoOverlay = document.getElementById('arInfoOverlay');
+const arInfoText = document.getElementById('arInfoText');
 
 function applyBannerStyles() {
   const b = CONFIG.banner;
@@ -502,6 +512,7 @@ function createHotspots() {
   CONFIG.hotspots.forEach((h, index) => {
     const el = document.createElement('div');
     el.className = 'hotspot' + (h.direction === 'left' ? ' left' : '');
+    el.dataset.hotspotId = h.id;
     el.dataset.label = h.label;
     el.dataset.name = h.name;
     el.dataset.short = h.short;
@@ -546,7 +557,9 @@ if (roomImage.complete) {
 }
 
 let currentModelUrl;
+let currentHotspotId;
 let qrVisible = false;
+let arInfoVisible = false;
 
 function closeQrOverlay() {
   qrVisible = false;
@@ -555,17 +568,29 @@ function closeQrOverlay() {
   arButton.textContent = 'In AR ansehen';
 }
 
-function openQrOverlay(modelUrl) {
+function closeArInfo() {
+  arInfoVisible = false;
+  arInfoOverlay.hidden = true;
+}
+
+function openArInfo() {
+  closeQrOverlay();
+  arInfoVisible = true;
+  arInfoOverlay.hidden = false;
+  const productName = nameEl.textContent || 'dieses Möbelstück';
+  arInfoText.textContent = 'Mit „In AR ansehen“ platzieren Sie ' + productName + ' über die Kamera Ihres Smartphones maßstabsgetreu in Ihrem eigenen Zuhause. So können Sie ganz einfach sehen, ob das Möbelstück wirklich zu Ihnen passt – bei Größe, Form und Stil.';
+}
+
+function openQrOverlay(hotspotId) {
+  closeArInfo();
   qrVisible = true;
   qrOverlay.hidden = false;
   qrCode.innerHTML = '';
   arButton.textContent = 'Schließen';
-  // Wandelt den relativen Modellpfad (z.B. "Sofa-AR.glb") automatisch in
-  // die volle, oeffentlich erreichbare GitHub-Pages-URL um, z.B.
-  // https://illumio3d.github.io/Showroom-/Sofa-AR.glb - funktioniert immer
-  // korrekt, egal unter welcher Domain/Unterordner die Seite laeuft.
-  const absoluteUrl = new URL(modelUrl, window.location.href).href;
-  QRCode.toCanvas(absoluteUrl, { width: 180, margin: 1, color: { dark: '#001230', light: '#ffffff' } }, (err, canvas) => {
+  const deepLinkUrl = new URL(window.location.href);
+  deepLinkUrl.hash = '';
+  deepLinkUrl.searchParams.set('ar', hotspotId);
+  QRCode.toCanvas(deepLinkUrl.href, { width: 180, margin: 1, color: { dark: '#001230', light: '#ffffff' } }, (err, canvas) => {
     if (err) {
       console.error(err);
       qrCode.innerHTML = '<div style="color:#fff;font-size:13px;text-align:center">QR-Code konnte nicht erzeugt werden.</div>';
@@ -583,7 +608,9 @@ function openBanner(hsElement) {
   viewer.src = hsElement.dataset.model;
   applyModelScale();
   currentModelUrl = hsElement.dataset.model;
+  currentHotspotId = hsElement.dataset.hotspotId;
   closeQrOverlay();
+  closeArInfo();
 
   arButton.onclick = () => {
     if (window.innerWidth <= 900) {
@@ -592,8 +619,8 @@ function openBanner(hsElement) {
     }
     if (qrVisible) {
       closeQrOverlay();
-    } else if (currentModelUrl) {
-      openQrOverlay(currentModelUrl);
+    } else if (currentHotspotId) {
+      openQrOverlay(currentHotspotId);
     }
   };
 
@@ -607,6 +634,7 @@ function openBanner(hsElement) {
 
 function closeBanner() {
   closeQrOverlay();
+  closeArInfo();
   banner.classList.remove('visible');
   bannerClose.classList.remove('visible');
   if (mobileHint && window.matchMedia('(max-width: 900px)').matches) {
@@ -615,8 +643,16 @@ function closeBanner() {
 }
 
 bannerClose.addEventListener('click', closeBanner);
+
+// "i"-Button erklaert jetzt die AR-Funktion in einem Panel im gleichen
+// Design wie der QR-Code-Bereich, statt eines schlichten alert()-Popups.
+// Erneutes Klicken schliesst das Panel wieder (Toggle-Verhalten).
 infoButton.addEventListener('click', () => {
-  alert('Weitere Infos zu ' + nameEl.textContent);
+  if (arInfoVisible) {
+    closeArInfo();
+  } else {
+    openArInfo();
+  }
 });
 
 room.addEventListener('click', (e) => {
@@ -643,6 +679,31 @@ if (mobileHint) {
 }
 
 createHotspots();
+
+// Beim Scannen des QR-Codes landet man hier mit ?ar=<hotspotId> in der
+// URL. Wir oeffnen automatisch das passende Produkt-Banner und starten,
+// sobald das 3D-Modell geladen ist, direkt die native AR-Ansicht.
+(function handleArDeepLink() {
+  const arId = new URLSearchParams(window.location.search).get('ar');
+  if (!arId) return;
+  const hotspotEl = document.querySelector('.hotspot[data-hotspot-id="' + arId + '"]');
+  if (!hotspotEl) return;
+
+  openBanner(hotspotEl);
+
+  const launchAR = () => {
+    if (viewer.activateAR) viewer.activateAR();
+  };
+  if (viewer.loaded) {
+    launchAR();
+  } else {
+    viewer.addEventListener('load', launchAR, { once: true });
+  }
+
+  const cleanUrl = new URL(window.location.href);
+  cleanUrl.searchParams.delete('ar');
+  window.history.replaceState({}, '', cleanUrl.toString());
+})();
 </script>
 </body>
 </html>
