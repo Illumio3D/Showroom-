@@ -336,10 +336,11 @@ const CONFIG = {
     desktop: '1 1 1',
     mobile: '1.15 1.15 1.15'
   },
-  // Hotspot-Definitionen. Optionales Feld "orientation" korrigiert die
-  // Ausrichtung des 3D-Modells (Format: "Xdeg Ydeg Zdeg"), unabhaengig
-  // vom Export der .glb-Datei. Greift sowohl in der Vorschau als auch in
-  // der echten AR-Ansicht. Standard (kein Wert) = "0deg 0deg 0deg".
+  // Hotspot-Definitionen.
+  // "orientation": gilt IMMER (auch in der normalen 3D-Vorschau).
+  // "arOrientation": gilt NUR waehrend einer echten AR-Sitzung (z.B. bei
+  //   Decken-Objekten, die durch die AR-Decken-Erkennung automatisch
+  //   zusaetzlich gespiegelt werden). Ohne Angabe = wie "orientation".
   hotspots: [
     { id: 'Sofa', label: 'Sofa Lurano', name: 'Lunaro Sofa', short: 'Unser gemütliches Lounge-Sofa', long: 'Ein großzügiges 3-Sitzer-Sofa mit weichem Webstoffbezug, angenehmer Polsterung und stabiler Unterkonstruktion. Die tiefe Sitzfläche und die hochwertige Verarbeitung sorgen für hohen Komfort und eine ruhige, moderne Wohnwirkung.', price: '899,00 €', model: 'Sofa-AR.glb', anchorX: 1501.2855, anchorY: 746.52234 },
     { id: 'tisch', label: 'Tisch Nordvik', name: 'Nordvik Couchtisch', short: 'Unser markanter Wohnzimmertisch', long: 'Ein Couchtisch mit massiver Holzplatte, geölter Oberfläche und klarer Formensprache. Das robuste Material ist langlebig, pflegeleicht im Alltag und bringt eine warme, natürliche Struktur in den Raum.', price: '299,00 €', model: 'Tisch-AR.glb', anchorX: 1593.8024, anchorY: 972.72241 },
@@ -348,7 +349,7 @@ const CONFIG = {
     { id: 'kleine-lampe', label: 'Tischlampe Mirea', name: 'Mirea Tischlampe', short: 'Unsere kleine Akzentlampe', long: 'Eine kompakte Tischlampe mit textilem Schirm und sanfter, wohnlicher Lichtwirkung. Sie ist ideal für Sideboards oder kleine Tische und setzt dezente Lichtakzente mit dekorativem Charakter.', price: '89,00 €', model: 'Kleine-lampe-AR.glb', anchorX: 994.6748, anchorY: 777.57147, direction: 'left' },
     { id: 'pflanzenregal', label: 'Regal Verdea', name: 'Verdea Regal', short: 'Unser offenes Pflanzenregal', long: 'Ein mehrstufiges Regal für Pflanzen, Keramik und dekorative Wohnobjekte mit leichter, offener Optik. Die stabile Konstruktion bietet viel Stellfläche und lässt den Raum gleichzeitig luftig und modern wirken.', price: '179,00 €', model: 'Pflanzenregal-AR.glb', anchorX: 1179.9099, anchorY: 567.26453, direction: 'left' },
     { id: 'kaffee-regal', label: 'Station Baristo', name: 'Baristo Station', short: 'Unser Regal für Kaffeemomente', long: 'Ein funktionales Regalmodul für Kaffeemaschine, Tassen und Zubehör mit sinnvoll gegliederten Ablageflächen. Es verbindet Stauraum, Ordnung und eine hochwertige Optik zu einer praktischen Coffee Corner im Wohnraum.', price: '199,00 €', model: 'Kaffee-Regal-AR.glb', anchorX: 1988.399, anchorY: 835.11975 },
-    { id: 'deckenlampe', label: 'Deckenlampe Orvian', name: 'Orvian Deckenlampe', short: 'Unsere moderne Deckenleuchte', long: 'Eine moderne Deckenleuchte mit angenehmer Lichtstreuung, klarer Linienführung und zeitloser Wirkung. Sie sorgt für gleichmäßige Grundbeleuchtung und passt mit ihrer dezenten Gestaltung in viele zeitgemäße Wohnkonzepte.', price: '149,00 €', model: 'DeckenLampe-AR.glb', anchorX: 1427.071, anchorY: 360.98199, orientation: '180deg 0deg 0deg' }
+    { id: 'deckenlampe', label: 'Deckenlampe Orvian', name: 'Orvian Deckenlampe', short: 'Unsere moderne Deckenleuchte', long: 'Eine moderne Deckenleuchte mit angenehmer Lichtstreuung, klarer Linienführung und zeitloser Wirkung. Sie sorgt für gleichmäßige Grundbeleuchtung und passt mit ihrer dezenten Gestaltung in viele zeitgemäße Wohnkonzepte.', price: '149,00 €', model: 'DeckenLampe-AR.glb', anchorX: 1427.071, anchorY: 360.98199, arOrientation: '180deg 0deg 0deg' }
   ]
 };
 
@@ -524,6 +525,7 @@ function createHotspots() {
     el.dataset.price = h.price;
     el.dataset.model = h.model;
     el.dataset.orientation = h.orientation || '0deg 0deg 0deg';
+    el.dataset.arOrientation = h.arOrientation || h.orientation || '0deg 0deg 0deg';
     el.dataset.index = index;
 
     const line = document.createElement('span');
@@ -563,8 +565,23 @@ if (roomImage.complete) {
 
 let currentModelUrl;
 let currentHotspotId;
+let currentPreviewOrientation = '0deg 0deg 0deg';
+let currentArOrientation = '0deg 0deg 0deg';
 let qrVisible = false;
 let arInfoVisible = false;
+
+// Wechselt die Ausrichtung automatisch, sobald eine echte AR-Sitzung
+// startet bzw. endet - dadurch bleibt die normale 3D-Vorschau IMMER in
+// ihrer eigentlich korrekten Ausrichtung, waehrend nur die AR-Ansicht
+// (die z.B. bei Decken-Objekten automatisch zusaetzlich spiegelt) die
+// separate Korrektur bekommt.
+viewer.addEventListener('ar-status', (event) => {
+  if (event.detail && event.detail.status === 'session-started') {
+    viewer.setAttribute('orientation', currentArOrientation);
+  } else {
+    viewer.setAttribute('orientation', currentPreviewOrientation);
+  }
+});
 
 function closeQrOverlay() {
   qrVisible = false;
@@ -611,9 +628,14 @@ function openBanner(hsElement) {
   longEl.textContent = hsElement.dataset.long;
   priceEl.textContent = hsElement.dataset.price;
   viewer.src = hsElement.dataset.model;
-  // Korrigiert die Modell-Ausrichtung (z.B. Deckenlampe), unabhaengig
-  // davon, wie die .glb-Datei exportiert wurde. Gilt in Vorschau UND AR.
-  viewer.setAttribute('orientation', hsElement.dataset.orientation || '0deg 0deg 0deg');
+
+  // Vorschau bekommt IMMER die normale Ausrichtung (orientation).
+  // Die AR-spezifische Ausrichtung (arOrientation) wird erst beim
+  // tatsaechlichen AR-Start durch den "ar-status"-Listener oben aktiv.
+  currentPreviewOrientation = hsElement.dataset.orientation || '0deg 0deg 0deg';
+  currentArOrientation = hsElement.dataset.arOrientation || currentPreviewOrientation;
+  viewer.setAttribute('orientation', currentPreviewOrientation);
+
   applyModelScale();
   currentModelUrl = hsElement.dataset.model;
   currentHotspotId = hsElement.dataset.hotspotId;
