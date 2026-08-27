@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Room POC mit Config</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+:root {
+  --scene-scale: 1;
+  --desktop-banner-width: 25%;
+  --desktop-banner-height: 90%;
+  --desktop-banner-left: 2%;
+  --label-scale: clamp(0.72, calc(0.58 + 0.42 * var(--scene-scale)), 1);
+  --mobile-label-scale: 0.72;
+  --mobile-line-scale: 0.78;
+}
+.scene { position: relative; width: 100vw; height: 100vh; background: #000; overflow: hidden; }
+.stage-shell { position: relative; width: 100%; height: 100%; background: #000; }
+.image-stage { position: absolute; inset: 0; overflow: hidden; background: #000; }
+.room-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center center; display: block; }
+.hotspot-layer { position: absolute; inset: 0; pointer-events: none; }
+.hotspot-layer .hotspot { pointer-events: auto; }
+.panel-area { position: absolute; inset: 0; pointer-events: none; }
+.info-banner, .banner-close, .mobile-hint { pointer-events: auto; }
+.mobile-hint { display: none; }
+
+/* Debug-Marker: sichtbare rote Punkte an den JS-berechneten Koordinaten.
+   Aufrufen mit ?debug=1 an der URL. */
+.debug-dot {
+  position: absolute;
+  width: 16px; height: 16px;
+  margin-left: -8px; margin-top: -8px;
+  border-radius: 50%;
+  background: rgba(255, 0, 60, 0.85);
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 8px rgba(255,0,60,0.9);
+  z-index: 999;
+  pointer-events: none;
+}
+.debug-dot::after {
+  content: attr(data-idx);
+  position: absolute;
+  top: 18px; left: 50%;
+  transform: translateX(-50%);
+  color: #fff; font-size: 11px; font-weight: 700;
+  text-shadow: 0 0 4px #000, 0 0 4px #000;
+  white-space: nowrap;
+}
+
+/* ===================== HOTSPOTS ===================== */
+.hotspot { position: absolute; transform: translate(-50%, -50%); width: 1px; height: 1px; cursor: pointer; z-index: 20; }
+.hotspot:hover { transform: translate(-50%, -50%) scale(1.03); }
+
+.hotspot::before {
+  content: "";
+  position: absolute;
+  left: 0; bottom: -0.75px;
+  width: 16px; height: 1.5px;
+  background: rgba(255, 255, 255, 0.72);
+  transform-origin: 0% 50%;
+  transform: rotate(-35deg);
+  pointer-events: none;
+  z-index: 1;
+}
+.hotspot.left::before {
+  left: auto; right: 0;
+  transform-origin: 100% 50%;
+  transform: rotate(35deg);
+}
+
+.hotspot-label {
+  position: absolute; left: 13.11px; bottom: 11.93px;
+  display: inline-block; white-space: nowrap;
+  background: rgba(0, 18, 60, 0.5); color: #fff;
+  padding: 7px 12px; border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(10px);
+  font-size: 13px; line-height: 1; letter-spacing: 0.01em;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  z-index: 2;
+  transform: scale(var(--label-scale));
+  transform-origin: left bottom;
+}
+.hotspot.left .hotspot-label { left: auto; right: 13.11px; transform-origin: right bottom; }
+
+.hotspot-line {
+  position: absolute; left: 13.11px; bottom: 8.43px;
+  height: 1.5px; background: rgba(255, 255, 255, 0.72);
+  z-index: 1;
+}
+.hotspot.left .hotspot-line { left: auto; right: 13.11px; }
+
+/* ===================== INFO-BANNER ===================== */
+.info-banner {
+  position: absolute;
+  display: none;
+  flex-direction: column;
+  padding: 58px 18px 22px 18px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.info-banner.visible { display: flex; }
+.info-card {
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  padding: 18px 18px 16px 18px;
+  margin-bottom: 12px;
+  backdrop-filter: blur(10px);
+}
+.info-name { font-size: 22px; font-weight: 700; line-height: 1.15; margin-bottom: 6px; color: #ffffff; }
+.info-short { font-size: 13px; line-height: 1.35; color: rgba(255, 255, 255, 0.78); margin-bottom: 12px; letter-spacing: 0.02em; }
+.info-long { font-size: 13px; line-height: 1.55; color: rgba(255, 255, 255, 0.92); margin-bottom: 14px; }
+.info-price { font-size: 19px; font-weight: 700; color: #ffffff; }
+.model-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 -18px;
+  position: relative;
+}
+.qr-overlay { position: absolute; left: 0; right: 0; bottom: 76px; z-index: 30; display: flex; justify-content: center; padding: 0 12px; }
+.qr-overlay[hidden] { display: none !important; }
+.qr-panel {
+  width: min(260px, 100%);
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+}
+.qr-title { margin-bottom: 12px; color: #fff; font-size: 14px; line-height: 1.3; text-align: center; }
+.qr-code { display: flex; justify-content: center; align-items: center; min-height: 180px; }
+.qr-code canvas, .qr-code img { width: 180px !important; height: 180px !important; background: #fff; border-radius: 12px; padding: 10px; }
+@media (max-width: 900px) {
+  .qr-overlay { display: none !important; }
+}
+model-viewer { width: 100%; height: 100%; max-height: 320px; border-radius: 0; background: transparent; --progress-bar-color: #00c9ff; }
+
+.button-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 10px;
+  margin-top: 4px;
+  width: 100%;
+}
+.ar-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 10px 22px !important;
+  border-radius: 999px !important;
+  border: none !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.02em !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.ar-button:hover { transform: translateY(-1px); box-shadow: 0 0 18px rgba(0, 0, 0, 0.4); }
+.info-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  max-width: 26px !important;
+  max-height: 26px !important;
+  border-radius: 50% !important;
+  border: 1px solid rgba(255, 255, 255, 0.7) !important;
+  background: rgba(0, 0, 0, 0.7) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  flex-shrink: 0 !important;
+  cursor: pointer !important;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.info-button:hover { background: rgba(0, 0, 0, 0.9) !important; color: rgba(255, 255, 255, 0.95) !important; transform: translateY(-1px); }
+.banner-close {
+  position: absolute; top: 14px; right: 14px;
+  display: none; align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  border: none; border-radius: 12px;
+  cursor: pointer; font-size: 20px; line-height: 1;
+  user-select: none;
+  background: rgba(0, 48, 130, 0.95);
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  z-index: 110;
+}
+.banner-close.visible { display: flex; }
+
+/* ===================== MOBILE (<=900px) ===================== */
+@media (max-width: 900px) {
+  html, body { overflow-x: hidden; overflow-y: auto; height: auto; background: #0a1020; }
+  .scene { width: 100%; height: auto; min-height: 100vh; overflow: visible; background: #0a1020; }
+  .stage-shell { position: relative; width: 100%; height: auto; background: #0a1020; }
+
+  .image-stage {
+    position: relative; top: auto; left: auto;
+    width: 100%; aspect-ratio: 1920 / 1440; height: auto;
+    overflow: hidden; background: #0a1020;
+  }
+  .room-image {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover;
+    object-position: right center;
+  }
+  .panel-area {
+    position: relative; inset: auto;
+    width: 100%;
+    padding: 14px 14px calc(28px + env(safe-area-inset-bottom)) 14px;
+    pointer-events: auto;
+    background: linear-gradient(180deg, #05070d 0%, #0a1020 100%);
+    overflow: visible;
+  }
+  .mobile-hint {
+    display: flex; align-items: center;
+    min-height: 120px; padding: 18px 18px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.88);
+    line-height: 1.5; font-size: 14px;
+    backdrop-filter: blur(10px);
+  }
+  .info-banner {
+    position: relative;
+    width: 100% !important; height: auto !important;
+    left: auto !important; top: auto !important;
+    transform: none !important;
+    border-radius: 18px !important;
+    padding: 16px 16px 18px 16px;
+    background: rgba(0, 18, 60, 0.52) !important;
+    pointer-events: auto;
+  }
+  .banner-close { display: none !important; }
+  .model-wrapper { order: -1; margin: -16px -16px 0 -16px; }
+  model-viewer { height: 220px; max-height: none; border-radius: 18px 18px 0 0; }
+
+  .hotspot-label { padding: 5px 8px; font-size: 13px; transform: scale(var(--mobile-label-scale)); }
+  .hotspot-line { transform: scaleX(var(--mobile-line-scale)); transform-origin: left center; height: 1.2px; }
+  .hotspot.left .hotspot-line { transform-origin: right center; }
+  .hotspot::before { height: 1.2px; bottom: -0.6px; }
+}
+</style>
+<script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+</head>
+<body>
+<div class="scene">
+  <div class="stage-shell">
+    <div class="image-stage">
+      <img class="room-image" id="roomImage" src="Raum_Render.svg" alt="Raumansicht" onerror="this.onerror=null;this.src='Raum_Render.png';">
+      <div class="hotspot-layer" id="room"></div>
+    </div>
+  </div>
+  <div class="panel-area">
+    <div class="mobile-hint" id="mobileHint">Tippen Sie auf die Labels im Bild, um Details, Materialien und Preise der Objekte zu sehen.</div>
+    <div class="info-banner" id="infoBanner">
+      <button class="banner-close" id="bannerClose" aria-label="Banner schließen">×</button>
+      <div class="info-card">
+        <div class="info-name" id="infoName">Nordvik Coffee Table</div>
+        <div class="info-short" id="infoShort">Massivholz Statementpiece</div>
+        <div class="info-long" id="infoLong">Ein hochwertiger Couchtisch mit geölter Massivholzplatte, ruhiger Form und langlebiger Verarbeitung. Ideal für moderne Wohnräume, mit robuster Oberfläche und zeitlosem Materialcharakter.</div>
+        <div class="info-price" id="infoPrice">299,00 €</div>
+      </div>
+      <div class="model-wrapper">
+        <model-viewer id="productViewer" src="" alt="3D Modell" camera-controls auto-rotate shadow-intensity="0.8" ar ar-modes="webxr scene-viewer quick-look" ar-scale="fixed" environment-image="neutral" exposure="1.0"></model-viewer>
+        <div class="qr-overlay" id="qrOverlay" hidden>
+          <div class="qr-panel">
+            <div class="qr-title">Auf dem Smartphone öffnen</div>
+            <div class="qr-code" id="qrCode"></div>
+          </div>
+        </div>
+      </div>
+      <div class="button-row">
+        <button class="ar-button" id="arButton">In AR ansehen</button>
+        <button class="info-button" id="infoButton">i</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===================== DEINE CONFIG =====================
+const CONFIG = {
+  image: { width: 2560, height: 1440 },
+  hotspot: {
+    size: 14,
+    color: '#00c9ff',
+    borderColor: '#ffffff',
+    borderWidth: 2
+  },
+  banner: {
+    widthPercent: 25,
+    heightPercent: 90,
+    leftPercent: 2,
+    topPercent: 50,
+    background: 'rgba(0, 18, 60, 0.5)',
+    borderRadius: 20,
+    textColor: '#ffffff',
+    arButtonBg: '#00c9ff',
+    arButtonText: '#001230'
+  },
+  closeButton: {
+    size: 40,
+    offsetRightPercent: 0.5,
+    offsetTopPercent: 0,
+    background: 'rgba(0, 18, 60, 0.5)',
+    textColor: '#ffffff'
+  },
+  modelScale: {
+    desktop: '1 1 1',
+    mobile: '1.15 1.15 1.15'
+  },
+  hotspots: [
+    { id: 'Sofa', label: 'Sofa Lurano', name: 'Lunaro Sofa', short: 'Unser gemütliches Lounge-Sofa', long: 'Ein großzügiges 3-Sitzer-Sofa mit weichem Webstoffbezug, angenehmer Polsterung und stabiler Unterkonstruktion. Die tiefe Sitzfläche und die hochwertige Verarbeitung sorgen für hohen Komfort und eine ruhige, moderne Wohnwirkung.', price: '899,00 €', model: 'Sofa-AR.glb', anchorX: 1501.2855, anchorY: 746.52234 },
+    { id: 'tisch', label: 'Tisch Nordvik', name: 'Nordvik Couchtisch', short: 'Unser markanter Wohnzimmertisch', long: 'Ein Couchtisch mit massiver Holzplatte, geölter Oberfläche und klarer Formensprache. Das robuste Material ist langlebig, pflegeleicht im Alltag und bringt eine warme, natürliche Struktur in den Raum.', price: '299,00 €', model: 'Tisch-AR.glb', anchorX: 1593.8024, anchorY: 972.72241 },
+    { id: 'kleiner-tisch', label: 'Tisch Avelin', name: 'Avelin Beistelltisch', short: 'Unser kompakter Beistelltisch', long: 'Ein leichter Beistelltisch mit pulverbeschichtetem Metallgestell und widerstandsfähiger Ablagefläche. Durch seine kompakte Größe lässt er sich flexibel einsetzen und eignet sich ideal für kleine Wohnbereiche oder als Ergänzung neben dem Sofa.', price: '149,00 €', model: 'kleiner-Tisch-AR.glb', anchorX: 1003.9689, anchorY: 896.91742 },
+    { id: 'lampe', label: 'Stehlampe Velora', name: 'Velora Stehlampe', short: 'Unsere elegante Stehlampe', long: 'Eine schlanke Stehlampe mit warmweißer LED-Technik, gleichmäßiger Lichtverteilung und modernem Finish. Sie erzeugt ein angenehmes Stimmungslicht, arbeitet energieeffizient und eignet sich perfekt für entspannte Abendbeleuchtung.', price: '129,00 €', model: 'Lampe-AR.glb', anchorX: 1669.8804, anchorY: 605.75946 },
+    { id: 'kleine-lampe', label: 'Tischlampe Mirea', name: 'Mirea Tischlampe', short: 'Unsere kleine Akzentlampe', long: 'Eine kompakte Tischlampe mit textilem Schirm und sanfter, wohnlicher Lichtwirkung. Sie ist ideal für Sideboards oder kleine Tische und setzt dezente Lichtakzente mit dekorativem Charakter.', price: '89,00 €', model: 'Kleine-lampe-AR.glb', anchorX: 994.6748, anchorY: 777.57147, direction: 'left' },
+    { id: 'pflanzenregal', label: 'Regal Verdea', name: 'Verdea Regal', short: 'Unser offenes Pflanzenregal', long: 'Ein mehrstufiges Regal für Pflanzen, Keramik und dekorative Wohnobjekte mit leichter, offener Optik. Die stabile Konstruktion bietet viel Stellfläche und lässt den Raum gleichzeitig luftig und modern wirken.', price: '179,00 €', model: 'Pflanzenregal-AR.glb', anchorX: 1179.9099, anchorY: 567.26453, direction: 'left' },
+    { id: 'kaffee-regal', label: 'Station Baristo', name: 'Baristo Station', short: 'Unser Regal für Kaffeemomente', long: 'Ein funktionales Regalmodul für Kaffeemaschine, Tassen und Zubehör mit sinnvoll gegliederten Ablageflächen. Es verbindet Stauraum, Ordnung und eine hochwertige Optik zu einer praktischen Coffee Corner im Wohnraum.', price: '199,00 €', model: 'Kaffee-Regal-AR.glb', anchorX: 1988.399, anchorY: 835.11975 },
+    { id: 'deckenlampe', label: 'Deckenlampe Orvian', name: 'Orvian Deckenlampe', short: 'Unsere moderne Deckenleuchte', long: 'Eine moderne Deckenleuchte mit angenehmer Lichtstreuung, klarer Linienführung und zeitloser Wirkung. Sie sorgt für gleichmäßige Grundbeleuchtung und passt mit ihrer dezenten Gestaltung in viele zeitgemäße Wohnkonzepte.', price: '149,00 €', model: 'DeckenLampe-AR.glb', anchorX: 1427.071, anchorY: 360.98199 }
+  ]
+};
+
+const CONFIGDISPLAY = { mobileLabelMode: 'number' };
+const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
+
+const room = document.getElementById('room');
+const roomImage = document.getElementById('roomImage');
+const banner = document.getElementById('infoBanner');
+const bannerClose = document.getElementById('bannerClose');
+const mobileHint = document.getElementById('mobileHint');
+const nameEl = document.getElementById('infoName');
+const shortEl = document.getElementById('infoShort');
+const longEl = document.getElementById('infoLong');
+const priceEl = document.getElementById('infoPrice');
+const viewer = document.getElementById('productViewer');
+const arButton = document.getElementById('arButton');
+const qrOverlay = document.getElementById('qrOverlay');
+const qrCode = document.getElementById('qrCode');
+const infoButton = document.getElementById('infoButton');
+
+function applyBannerStyles() {
+  const b = CONFIG.banner;
+  const c = CONFIG.closeButton;
+  const isMobile = window.innerWidth <= 900;
+
+  banner.style.color = b.textColor;
+  arButton.style.background = b.arButtonBg;
+  arButton.style.color = b.arButtonText;
+  bannerClose.style.background = c.background;
+  bannerClose.style.color = c.textColor;
+
+  if (isMobile) {
+    banner.style.width = '100%';
+    banner.style.height = 'auto';
+    banner.style.left = 'auto';
+    banner.style.top = 'auto';
+    banner.style.transform = 'none';
+    banner.style.background = 'rgba(0, 18, 60, 0.52)';
+    banner.style.borderRadius = '18px';
+    room.style.setProperty('--label-scale', 0.92);
+    return;
+  }
+
+  const designWidth = 1440;
+  const designHeight = 900;
+  const scaleX = window.innerWidth / designWidth;
+  const scaleY = window.innerHeight / designHeight;
+  const sceneScale = Math.min(scaleX, scaleY);
+  document.documentElement.style.setProperty('--scene-scale', sceneScale.toFixed(4));
+
+  banner.style.width = b.widthPercent + 'vw';
+  banner.style.height = b.heightPercent + 'vh';
+  banner.style.left = b.leftPercent + 'vw';
+  banner.style.top = '50%';
+  banner.style.transform = 'translateY(-50%)';
+  banner.style.background = b.background;
+  banner.style.borderRadius = b.borderRadius + 'px';
+
+  const labelScale = labelScaleCurve(sceneScale);
+  document.documentElement.style.setProperty('--label-scale', labelScale.toFixed(4));
+}
+
+function labelScaleCurve(sceneScale) {
+  return Math.max(0.72, Math.min(1, 0.58 + sceneScale * 0.42));
+}
+
+function isMobileViewport() {
+  return window.matchMedia('(max-width: 900px)').matches;
+}
+
+function getHotspotDisplayLabel(hotspot, index) {
+  if (CONFIGDISPLAY.mobileLabelMode === 'number' && isMobileViewport()) {
+    return String(index + 1);
+  }
+  return hotspot.label;
+}
+
+function applyModelScale() {
+  const scale = isMobileViewport() ? CONFIG.modelScale.mobile : CONFIG.modelScale.desktop;
+  viewer.setAttribute('scale', scale);
+}
+
+function getImageCoverRect() {
+  const rect = room.getBoundingClientRect();
+  const containerW = rect.width;
+  const containerH = rect.height;
+  const imgW = CONFIG.image.width;
+  const imgH = CONFIG.image.height;
+  const containerRatio = containerW / containerH;
+  const imgRatio = imgW / imgH;
+  const alignX = isMobileViewport() ? 1 : 0.5;
+  const alignY = 0.5;
+
+  let renderW, renderH;
+  if (imgRatio > containerRatio) {
+    renderH = containerH;
+    renderW = containerH * imgRatio;
+  } else {
+    renderW = containerW;
+    renderH = containerW / imgRatio;
+  }
+  const offsetX = (containerW - renderW) * alignX;
+  const offsetY = (containerH - renderH) * alignY;
+  return { renderW, renderH, offsetX, offsetY };
+}
+
+function anchorToPixelPosition(anchorX, anchorY) {
+  const { renderW, renderH, offsetX, offsetY } = getImageCoverRect();
+  const imgW = CONFIG.image.width;
+  const imgH = CONFIG.image.height;
+  return {
+    left: offsetX + (anchorX / imgW) * renderW,
+    top: offsetY + (anchorY / imgH) * renderH
+  };
+}
+
+function updateHotspotPositions() {
+  document.querySelectorAll('.hotspot').forEach(el => {
+    const index = Number(el.dataset.index);
+    const h = CONFIG.hotspots[index];
+    const { left, top } = anchorToPixelPosition(h.anchorX, h.anchorY);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+  });
+  if (DEBUG) updateDebugDots();
+}
+
+function updateDebugDots() {
+  document.querySelectorAll('.debug-dot').forEach(el => {
+    const index = Number(el.dataset.idx) - 1;
+    const h = CONFIG.hotspots[index];
+    const { left, top } = anchorToPixelPosition(h.anchorX, h.anchorY);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+  });
+}
+
+function createDebugDots() {
+  CONFIG.hotspots.forEach((h, index) => {
+    const dot = document.createElement('div');
+    dot.className = 'debug-dot';
+    dot.dataset.idx = index + 1;
+    room.appendChild(dot);
+  });
+  updateDebugDots();
+}
+
+function updateHotspotLabels() {
+  document.querySelectorAll('.hotspot').forEach(el => {
+    const index = Number(el.dataset.index);
+    const h = CONFIG.hotspots[index];
+    const label = el.querySelector('.hotspot-label');
+    const line = el.querySelector('.hotspot-line');
+    label.textContent = getHotspotDisplayLabel(h, index);
+    requestAnimationFrame(() => {
+      line.style.width = label.offsetWidth + 'px';
+    });
+  });
+}
+
+function createHotspots() {
+  CONFIG.hotspots.forEach((h, index) => {
+    const el = document.createElement('div');
+    el.className = 'hotspot' + (h.direction === 'left' ? ' left' : '');
+    el.dataset.label = h.label;
+    el.dataset.name = h.name;
+    el.dataset.short = h.short;
+    el.dataset.long = h.long || h.description;
+    el.dataset.price = h.price;
+    el.dataset.model = h.model;
+    el.dataset.index = index;
+
+    const line = document.createElement('span');
+    line.className = 'hotspot-line';
+    const label = document.createElement('span');
+    label.className = 'hotspot-label';
+    label.textContent = getHotspotDisplayLabel(h, index);
+
+    el.appendChild(line);
+    el.appendChild(label);
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openBanner(el);
+    });
+    room.appendChild(el);
+
+    requestAnimationFrame(() => {
+      const labelWidth = label.offsetWidth;
+      line.style.width = labelWidth + 'px';
+    });
+  });
+  updateHotspotPositions();
+  if (DEBUG) createDebugDots();
+}
+
+function refreshHotspots() {
+  updateHotspotPositions();
+  updateHotspotLabels();
+}
+
+window.addEventListener('resize', refreshHotspots);
+if (roomImage.complete) {
+  refreshHotspots();
+} else {
+  roomImage.addEventListener('load', refreshHotspots);
+}
+
+let currentModelUrl;
+let qrVisible = false;
+
+function closeQrOverlay() {
+  qrVisible = false;
+  qrOverlay.hidden = true;
+  qrCode.innerHTML = '';
+  arButton.textContent = 'In AR ansehen';
+}
+
+function openQrOverlay(modelUrl) {
+  qrVisible = true;
+  qrOverlay.hidden = false;
+  qrCode.innerHTML = '';
+  arButton.textContent = 'Schließen';
+  const absoluteUrl = new URL(modelUrl, window.location.href).href;
+  QRCode.toCanvas(absoluteUrl, { width: 180, margin: 1, color: { dark: '#001230', light: '#ffffff' } }, (err, canvas) => {
+    if (err) {
+      console.error(err);
+      qrCode.innerHTML = '<div style="color:#fff;font-size:13px;text-align:center">QR-Code konnte nicht erzeugt werden.</div>';
+      return;
+    }
+    qrCode.appendChild(canvas);
+  });
+}
+
+function openBanner(hsElement) {
+  nameEl.textContent = hsElement.dataset.name || 'Objekt';
+  shortEl.textContent = hsElement.dataset.short;
+  longEl.textContent = hsElement.dataset.long;
+  priceEl.textContent = hsElement.dataset.price;
+  viewer.src = hsElement.dataset.model;
+  applyModelScale();
+  currentModelUrl = hsElement.dataset.model;
+  closeQrOverlay();
+
+  // WICHTIG: Auf Mobile hat der Nutzer i.d.R. ein Geraet mit nativer
+  // AR-Faehigkeit -> direkt aktivieren. Auf Desktop gibt es keine Kamera-
+  // basierte AR -> QR-Code anzeigen, damit man mit dem Handy scannen kann.
+  // (Vorher war diese Bedingung vertauscht - deshalb kam auf Desktop kein
+  // Popup mehr.)
+  arButton.onclick = () => {
+    if (window.innerWidth <= 900) {
+      if (viewer.activateAR) viewer.activateAR();
+      return;
+    }
+    if (qrVisible) {
+      closeQrOverlay();
+    } else if (currentModelUrl) {
+      openQrOverlay(currentModelUrl);
+    }
+  };
+
+  if (mobileHint && window.matchMedia('(max-width: 900px)').matches) {
+    mobileHint.style.display = 'none';
+  }
+
+  banner.classList.add('visible');
+  bannerClose.classList.add('visible');
+}
+
+function closeBanner() {
+  closeQrOverlay();
+  banner.classList.remove('visible');
+  bannerClose.classList.remove('visible');
+  if (mobileHint && window.matchMedia('(max-width: 900px)').matches) {
+    mobileHint.style.display = 'flex';
+  }
+}
+
+bannerClose.addEventListener('click', closeBanner);
+infoButton.addEventListener('click', () => {
+  alert('Weitere Infos zu ' + nameEl.textContent);
+});
+
+room.addEventListener('click', (e) => {
+  const clickedHotspot = e.target.closest('.hotspot');
+  if (!clickedHotspot && !banner.contains(e.target) && !bannerClose.contains(e.target)) {
+    closeBanner();
+  }
+});
+
+applyBannerStyles();
+if (mobileHint && window.matchMedia('(max-width: 900px)').matches) {
+  mobileHint.style.display = 'flex';
+}
+window.addEventListener('resize', () => {
+  applyBannerStyles();
+  applyModelScale();
+});
+if (mobileHint) {
+  if (window.innerWidth <= 900 && !banner.classList.contains('visible')) {
+    mobileHint.style.display = 'flex';
+  } else {
+    mobileHint.style.display = 'none';
+  }
+}
+
+createHotspots();
+</script>
+</body>
+</html>
