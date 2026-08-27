@@ -336,11 +336,10 @@ const CONFIG = {
     desktop: '1 1 1',
     mobile: '1.15 1.15 1.15'
   },
-  // Hotspot-Definitionen.
-  // "orientation": gilt IMMER (auch in der normalen 3D-Vorschau).
-  // "arOrientation": gilt NUR waehrend einer echten AR-Sitzung (z.B. bei
-  //   Decken-Objekten, die durch die AR-Decken-Erkennung automatisch
-  //   zusaetzlich gespiegelt werden). Ohne Angabe = wie "orientation".
+  // "orientation": gilt in der normalen 3D-Vorschau.
+  // "arOrientation": gilt NUR waehrend einer echten AR-Sitzung (wird
+  //   aktiv GESETZT bevor activateAR() aufgerufen wird, nicht erst danach
+  //   ueber ein Ereignis - das war der vorherige Timing-Fehler).
   hotspots: [
     { id: 'Sofa', label: 'Sofa Lurano', name: 'Lunaro Sofa', short: 'Unser gemütliches Lounge-Sofa', long: 'Ein großzügiges 3-Sitzer-Sofa mit weichem Webstoffbezug, angenehmer Polsterung und stabiler Unterkonstruktion. Die tiefe Sitzfläche und die hochwertige Verarbeitung sorgen für hohen Komfort und eine ruhige, moderne Wohnwirkung.', price: '899,00 €', model: 'Sofa-AR.glb', anchorX: 1501.2855, anchorY: 746.52234 },
     { id: 'tisch', label: 'Tisch Nordvik', name: 'Nordvik Couchtisch', short: 'Unser markanter Wohnzimmertisch', long: 'Ein Couchtisch mit massiver Holzplatte, geölter Oberfläche und klarer Formensprache. Das robuste Material ist langlebig, pflegeleicht im Alltag und bringt eine warme, natürliche Struktur in den Raum.', price: '299,00 €', model: 'Tisch-AR.glb', anchorX: 1593.8024, anchorY: 972.72241 },
@@ -570,15 +569,20 @@ let currentArOrientation = '0deg 0deg 0deg';
 let qrVisible = false;
 let arInfoVisible = false;
 
-// Wechselt die Ausrichtung automatisch, sobald eine echte AR-Sitzung
-// startet bzw. endet - dadurch bleibt die normale 3D-Vorschau IMMER in
-// ihrer eigentlich korrekten Ausrichtung, waehrend nur die AR-Ansicht
-// (die z.B. bei Decken-Objekten automatisch zusaetzlich spiegelt) die
-// separate Korrektur bekommt.
+// Startet die AR-Ansicht: setzt die AR-spezifische Ausrichtung DIREKT
+// und SYNCHRON, bevor activateAR() aufgerufen wird - so ist garantiert,
+// dass AR das Modell schon mit der richtigen Ausrichtung platziert,
+// statt erst nachtraeglich per Ereignis korrigiert zu werden.
+function enterAR() {
+  viewer.setAttribute('orientation', currentArOrientation);
+  if (viewer.activateAR) viewer.activateAR();
+}
+
+// Sobald die AR-Sitzung endet (oder fehlschlaegt), zurueck zur normalen,
+// bereits korrekten Vorschau-Ausrichtung wechseln.
 viewer.addEventListener('ar-status', (event) => {
-  if (event.detail && event.detail.status === 'session-started') {
-    viewer.setAttribute('orientation', currentArOrientation);
-  } else {
+  const status = event.detail && event.detail.status;
+  if (status === 'not-presenting' || status === 'failed' || !status) {
     viewer.setAttribute('orientation', currentPreviewOrientation);
   }
 });
@@ -629,9 +633,6 @@ function openBanner(hsElement) {
   priceEl.textContent = hsElement.dataset.price;
   viewer.src = hsElement.dataset.model;
 
-  // Vorschau bekommt IMMER die normale Ausrichtung (orientation).
-  // Die AR-spezifische Ausrichtung (arOrientation) wird erst beim
-  // tatsaechlichen AR-Start durch den "ar-status"-Listener oben aktiv.
   currentPreviewOrientation = hsElement.dataset.orientation || '0deg 0deg 0deg';
   currentArOrientation = hsElement.dataset.arOrientation || currentPreviewOrientation;
   viewer.setAttribute('orientation', currentPreviewOrientation);
@@ -644,7 +645,7 @@ function openBanner(hsElement) {
 
   arButton.onclick = () => {
     if (window.innerWidth <= 900) {
-      if (viewer.activateAR) viewer.activateAR();
+      enterAR();
       return;
     }
     if (qrVisible) {
@@ -709,7 +710,8 @@ createHotspots();
 
 // Beim Scannen des QR-Codes landet man hier mit ?ar=<hotspotId> in der
 // URL. Wir oeffnen automatisch das passende Produkt-Banner und starten,
-// sobald das 3D-Modell geladen ist, direkt die native AR-Ansicht.
+// sobald das 3D-Modell geladen ist, direkt die native AR-Ansicht (mit
+// bereits korrekt gesetzter AR-Ausrichtung, siehe enterAR()).
 (function handleArDeepLink() {
   const arId = new URLSearchParams(window.location.search).get('ar');
   if (!arId) return;
@@ -718,13 +720,10 @@ createHotspots();
 
   openBanner(hotspotEl);
 
-  const launchAR = () => {
-    if (viewer.activateAR) viewer.activateAR();
-  };
   if (viewer.loaded) {
-    launchAR();
+    enterAR();
   } else {
-    viewer.addEventListener('load', launchAR, { once: true });
+    viewer.addEventListener('load', enterAR, { once: true });
   }
 
   const cleanUrl = new URL(window.location.href);
