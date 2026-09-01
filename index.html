@@ -336,10 +336,10 @@ const CONFIG = {
     desktop: '1 1 1',
     mobile: '1.15 1.15 1.15'
   },
-  // "orientation": gilt in der normalen 3D-Vorschau.
-  // "arOrientation": gilt NUR waehrend einer echten AR-Sitzung (wird
-  //   aktiv GESETZT bevor activateAR() aufgerufen wird, nicht erst danach
-  //   ueber ein Ereignis - das war der vorherige Timing-Fehler).
+  // "model": Datei fuer die normale 3D-Vorschau im Banner.
+  // "arModel": OPTIONALE separate, in Blender vorab um 180 Grad gedrehte
+  //   Datei, die NUR beim tatsaechlichen Start von AR verwendet wird.
+  //   Ohne Angabe wird automatisch dieselbe Datei wie "model" verwendet.
   hotspots: [
     { id: 'Sofa', label: 'Sofa Lurano', name: 'Lunaro Sofa', short: 'Unser gemütliches Lounge-Sofa', long: 'Ein großzügiges 3-Sitzer-Sofa mit weichem Webstoffbezug, angenehmer Polsterung und stabiler Unterkonstruktion. Die tiefe Sitzfläche und die hochwertige Verarbeitung sorgen für hohen Komfort und eine ruhige, moderne Wohnwirkung.', price: '899,00 €', model: 'Sofa-AR.glb', anchorX: 1501.2855, anchorY: 746.52234 },
     { id: 'tisch', label: 'Tisch Nordvik', name: 'Nordvik Couchtisch', short: 'Unser markanter Wohnzimmertisch', long: 'Ein Couchtisch mit massiver Holzplatte, geölter Oberfläche und klarer Formensprache. Das robuste Material ist langlebig, pflegeleicht im Alltag und bringt eine warme, natürliche Struktur in den Raum.', price: '299,00 €', model: 'Tisch-AR.glb', anchorX: 1593.8024, anchorY: 972.72241 },
@@ -348,7 +348,7 @@ const CONFIG = {
     { id: 'kleine-lampe', label: 'Tischlampe Mirea', name: 'Mirea Tischlampe', short: 'Unsere kleine Akzentlampe', long: 'Eine kompakte Tischlampe mit textilem Schirm und sanfter, wohnlicher Lichtwirkung. Sie ist ideal für Sideboards oder kleine Tische und setzt dezente Lichtakzente mit dekorativem Charakter.', price: '89,00 €', model: 'Kleine-lampe-AR.glb', anchorX: 994.6748, anchorY: 777.57147, direction: 'left' },
     { id: 'pflanzenregal', label: 'Regal Verdea', name: 'Verdea Regal', short: 'Unser offenes Pflanzenregal', long: 'Ein mehrstufiges Regal für Pflanzen, Keramik und dekorative Wohnobjekte mit leichter, offener Optik. Die stabile Konstruktion bietet viel Stellfläche und lässt den Raum gleichzeitig luftig und modern wirken.', price: '179,00 €', model: 'Pflanzenregal-AR.glb', anchorX: 1179.9099, anchorY: 567.26453, direction: 'left' },
     { id: 'kaffee-regal', label: 'Station Baristo', name: 'Baristo Station', short: 'Unser Regal für Kaffeemomente', long: 'Ein funktionales Regalmodul für Kaffeemaschine, Tassen und Zubehör mit sinnvoll gegliederten Ablageflächen. Es verbindet Stauraum, Ordnung und eine hochwertige Optik zu einer praktischen Coffee Corner im Wohnraum.', price: '199,00 €', model: 'Kaffee-Regal-AR.glb', anchorX: 1988.399, anchorY: 835.11975 },
-    { id: 'deckenlampe', label: 'Deckenlampe Orvian', name: 'Orvian Deckenlampe', short: 'Unsere moderne Deckenleuchte', long: 'Eine moderne Deckenleuchte mit angenehmer Lichtstreuung, klarer Linienführung und zeitloser Wirkung. Sie sorgt für gleichmäßige Grundbeleuchtung und passt mit ihrer dezenten Gestaltung in viele zeitgemäße Wohnkonzepte.', price: '149,00 €', model: 'DeckenLampe-AR.glb', anchorX: 1427.071, anchorY: 360.98199, arOrientation: '180deg 0deg 0deg' }
+    { id: 'deckenlampe', label: 'Deckenlampe Orvian', name: 'Orvian Deckenlampe', short: 'Unsere moderne Deckenleuchte', long: 'Eine moderne Deckenleuchte mit angenehmer Lichtstreuung, klarer Linienführung und zeitloser Wirkung. Sie sorgt für gleichmäßige Grundbeleuchtung und passt mit ihrer dezenten Gestaltung in viele zeitgemäße Wohnkonzepte.', price: '149,00 €', model: 'DeckenLampe-AR.glb', anchorX: 1427.071, anchorY: 360.98199, arModel: 'DeckenLampe-AR-ceiling.glb' }
   ]
 };
 
@@ -523,8 +523,7 @@ function createHotspots() {
     el.dataset.long = h.long || h.description;
     el.dataset.price = h.price;
     el.dataset.model = h.model;
-    el.dataset.orientation = h.orientation || '0deg 0deg 0deg';
-    el.dataset.arOrientation = h.arOrientation || h.orientation || '0deg 0deg 0deg';
+    el.dataset.arModel = h.arModel || h.model;
     el.dataset.index = index;
 
     const line = document.createElement('span');
@@ -563,27 +562,24 @@ if (roomImage.complete) {
 }
 
 let currentModelUrl;
+let currentArModelUrl;
 let currentHotspotId;
-let currentPreviewOrientation = '0deg 0deg 0deg';
-let currentArOrientation = '0deg 0deg 0deg';
 let qrVisible = false;
 let arInfoVisible = false;
 
-// Startet die AR-Ansicht: setzt die AR-spezifische Ausrichtung DIREKT
-// und SYNCHRON, bevor activateAR() aufgerufen wird - so ist garantiert,
-// dass AR das Modell schon mit der richtigen Ausrichtung platziert,
-// statt erst nachtraeglich per Ereignis korrigiert zu werden.
 function enterAR() {
-  viewer.setAttribute('orientation', currentArOrientation);
+  if (currentArModelUrl && currentArModelUrl !== viewer.src) {
+    viewer.src = currentArModelUrl;
+  }
   if (viewer.activateAR) viewer.activateAR();
 }
 
-// Sobald die AR-Sitzung endet (oder fehlschlaegt), zurueck zur normalen,
-// bereits korrekten Vorschau-Ausrichtung wechseln.
 viewer.addEventListener('ar-status', (event) => {
   const status = event.detail && event.detail.status;
   if (status === 'not-presenting' || status === 'failed' || !status) {
-    viewer.setAttribute('orientation', currentPreviewOrientation);
+    if (currentModelUrl && viewer.src && !viewer.src.endsWith(currentModelUrl)) {
+      viewer.src = currentModelUrl;
+    }
   }
 });
 
@@ -631,14 +627,12 @@ function openBanner(hsElement) {
   shortEl.textContent = hsElement.dataset.short;
   longEl.textContent = hsElement.dataset.long;
   priceEl.textContent = hsElement.dataset.price;
-  viewer.src = hsElement.dataset.model;
 
-  currentPreviewOrientation = hsElement.dataset.orientation || '0deg 0deg 0deg';
-  currentArOrientation = hsElement.dataset.arOrientation || currentPreviewOrientation;
-  viewer.setAttribute('orientation', currentPreviewOrientation);
+  currentModelUrl = hsElement.dataset.model;
+  currentArModelUrl = hsElement.dataset.arModel || currentModelUrl;
+  viewer.src = currentModelUrl;
 
   applyModelScale();
-  currentModelUrl = hsElement.dataset.model;
   currentHotspotId = hsElement.dataset.hotspotId;
   closeQrOverlay();
   closeArInfo();
@@ -710,8 +704,7 @@ createHotspots();
 
 // Beim Scannen des QR-Codes landet man hier mit ?ar=<hotspotId> in der
 // URL. Wir oeffnen automatisch das passende Produkt-Banner und starten,
-// sobald das 3D-Modell geladen ist, direkt die native AR-Ansicht (mit
-// bereits korrekt gesetzter AR-Ausrichtung, siehe enterAR()).
+// sobald das 3D-Modell geladen ist, direkt die native AR-Ansicht.
 (function handleArDeepLink() {
   const arId = new URLSearchParams(window.location.search).get('ar');
   if (!arId) return;
